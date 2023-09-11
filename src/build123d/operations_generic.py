@@ -59,6 +59,7 @@ from build123d.topology import (
     ShapeList,
     Sketch,
     Solid,
+    SplitTool,
     Vertex,
     Wire,
 )
@@ -843,7 +844,7 @@ SplitType = Union[Edge, Wire, Face, Solid]
 
 def split(
     objects: Union[SplitType, Iterable[SplitType]] = None,
-    bisect_by: Plane = Plane.XZ,
+    bisect_by: SplitTool = Plane.XZ,
     keep: Keep = Keep.TOP,
     mode: Mode = Mode.REPLACE,
 ):
@@ -852,10 +853,11 @@ def split(
     Applies to 1, 2, and 3 dimensional objects.
 
     Bisect object with plane and keep either top, bottom or both.
+    The top and bottom parts are given depending on the orientation of the tool.
 
     Args:
         objects (Union[Edge, Wire, Face, Solid] or Iterable of), objects to split
-        bisect_by (Plane, optional): plane to segment part. Defaults to Plane.XZ.
+        bisect_by (SplitTool, optional): tool to segment part. Defaults to Plane.XZ.
         keep (Keep, optional): selector for which segment to keep. Defaults to Keep.TOP.
         mode (Mode, optional): combination mode. Defaults to Mode.REPLACE.
 

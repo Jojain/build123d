@@ -308,6 +308,7 @@ DEG2RAD = pi / 180.0
 RAD2DEG = 180 / pi
 HASH_CODE_MAX = 2147483647  # max 32bit signed int, required by OCC.Core.HashCode
 
+SplitTool = Union[Plane, "Face", "Shell", "Compound"]
 
 shape_LUT = {
     ta.TopAbs_VERTEX: "Vertex",
@@ -2408,13 +2409,14 @@ class Shape(NodeMixin):
 
         return ShapeList([Face(face) for face in faces])
 
-    def split(self, plane: Plane, keep: Keep = Keep.TOP) -> Self:
+    def split(self, tool: SplitTool, keep: Keep = Keep.TOP) -> Self:
         """split
 
-        Split this shape by the provided plane.
+        Split this shape by the provided tool.
+        Top and bottom parts are given depending on the tool orientation.
 
         Args:
-            plane (Plane): plane to segment shape
+            tool (SplitTool): The tool to segment shape
             keep (Keep, optional): which object(s) to save. Defaults to Keep.TOP.
 
         Returns:
@@ -2423,10 +2425,19 @@ class Shape(NodeMixin):
         shape_list = TopTools_ListOfShape()
         shape_list.Append(self.wrapped)
 
-        # Define the splitting plane
-        tool = Face.make_plane(plane).wrapped
+        # Define the splitting surface
+        if isinstance(tool, Plane):
+            surf = Face.make_plane(tool).wrapped
+        else:
+            # Assert that the tool is 2D
+            if (
+                tool.volume > 0
+            ):  # This is bugged faces and shell have a volume even if they are 2D
+                raise ValueError("The tool must be 2D")
+            surf = tool.wrapped
+
         tool_list = TopTools_ListOfShape()
-        tool_list.Append(tool)
+        tool_list.Append(surf)
 
         # Create the splitter algorithm
         splitter = BRepAlgoAPI_Splitter()
@@ -2445,7 +2456,26 @@ class Shape(NodeMixin):
             tops = []
             bottoms = []
             for part in parts:
-                if plane.to_local_coords(part).center().Z >= 0:
+                if isinstance(tool, Plane):
+                    criterion = tool.to_local_coords(part).center().Z >= 0
+                else:
+                    tool_orientation = sum(
+                        [f.normal_at(f.center()) for f in tool.faces()],
+                        Vector(0, 0, 0),
+                    )
+                    tool_center = (
+                        sum([f.center() for f in tool.faces()], Vector(0, 0, 0)) / 2
+                    )
+                    rel_center = part.center() - tool_center
+                    criterion = tool_orientation.dot(rel_center) > 0
+                    print(f"tool_orientation: {tool_orientation}")
+                    print(f"rel_center: {rel_center}")
+                    l = Edge.make_line(part.center(), tool_center)
+                    l1 = Edge.make_line(
+                        tool_center, tool_center + tool_orientation * 50
+                    )
+
+                if criterion:
                     tops.append(part)
                 else:
                     bottoms.append(part)
