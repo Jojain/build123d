@@ -1679,13 +1679,14 @@ class Shape(NodeMixin):
 
         The return values depend on the type of the shape:
 
-        | Vertex:  always Vertex
-        | Edge:   LINE, ARC, CIRCLE, SPLINE
-        | Face:   PLANE, SPHERE, CONE
-        | Solid:  Solid
-        | Shell:  Shell
-        | Compound: Compound
+        | Vertex: Vertex
+        | Edge:   LINE, CIRCLE, ELLIPSE, BSPLINE, HYPERBOLA, PARABOLA, BEZIER, OFFSET, OTHER
         | Wire:   Wire
+        | Face:   PLANE, CYLINDER, CONE, SPHERE, TORUS, BEZIER, BSPLINE, REVOLUTION, EXTRUSION, OFFSET, OTHER
+        | Shell:  Shell
+        | Solid:  Solid
+        | Compound: Compound
+        | CompSolid: Compound
 
         Args:
 
