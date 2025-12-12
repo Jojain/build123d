@@ -100,7 +100,6 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakePolygon,
     BRepBuilderAPI_MakeSolid,
-    BRepBuilderAPI_Sewing,
 )
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -114,6 +113,7 @@ from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Shell
 from lib3mf import Lib3MF
 
 from build123d.build_enums import MeshType, Unit
+from build123d.builders import ocp_sewing
 from build123d.geometry import TOLERANCE, Color
 from build123d.topology import (
     Compound,
@@ -466,13 +466,13 @@ class Mesher:
         # Extract all the vertices
         gp_pnts = [gp_Pnt(*p.Coordinates[0:3]) for p in mesh_3mf.GetVertices()]
 
-        # Extract all the triangle and create a Shell from generated Faces
-        shell_builder = BRepBuilderAPI_Sewing()
+        # Extract all the triangles and create Faces
+        facets = []
         for i in range(mesh_3mf.GetTriangleCount()):
             # Extract the vertex indices for this triangle
             tri_indices = mesh_3mf.GetTriangle(i).Indices[0:3]
             # Convert to a list of gp_Pnt
-            ocp_vertices = [gp_pnts[tri_indices[i]] for i in range(3)]
+            ocp_vertices = [gp_pnts[tri_indices[j]] for j in range(3)]
             # Create the triangular face using the polygon
             polygon_builder = BRepBuilderAPI_MakePolygon(
                 ocp_vertices[0], ocp_vertices[1], ocp_vertices[2], Close=True
@@ -482,11 +482,10 @@ class Mesher:
             facet_properties = GProp_GProps()
             BRepGProp.SurfaceProperties_s(facet, facet_properties)
             if facet_properties.Mass() != 0:  # Area==0 is an invalid facet
-                shell_builder.Add(facet)
+                facets.append(facet)
 
         # Create the Shell(s) - if the object has voids there will be multiple
-        shell_builder.Perform()
-        occ_sewed_shape = downcast(shell_builder.SewedShape())
+        occ_sewed_shape = downcast(ocp_sewing(facets))
 
         if isinstance(occ_sewed_shape, TopoDS_Compound):
             bd_shells = []

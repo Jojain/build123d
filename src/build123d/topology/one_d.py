@@ -84,8 +84,6 @@ from OCP.BRepGProp import BRepGProp, BRepGProp_Face
 from OCP.BRepLib import BRepLib, BRepLib_FindSurface
 from OCP.BRepLProp import BRepLProp
 from OCP.BRepOffset import BRepOffset_MakeOffset
-from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffset
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeHalfSpace
 from OCP.BRepProj import BRepProj_Projection
 from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
 from OCP.GC import GC_MakeArcOfCircle, GC_MakeArcOfEllipse
@@ -221,6 +219,8 @@ from build123d.geometry import (
     VectorLike,
     logger,
 )
+
+from build123d.builders import ocp_offset_wire
 
 from .shape_core import (
     TOPODS,
@@ -1047,13 +1047,7 @@ class Mixin1D(Shape[TOPODS]):
             topods_wire = line.wrapped
         assert topods_wire is not None
 
-        offset_builder = BRepOffsetAPI_MakeOffset()
-        offset_builder.Init(kind_dict[kind])
-        # offset_builder.SetApprox(True)
-        offset_builder.AddWire(topods_wire)
-        offset_builder.Perform(distance)
-
-        obj = downcast(offset_builder.Shape())
+        obj = downcast(ocp_offset_wire(topods_wire, distance, kind_dict[kind]))
         if isinstance(obj, TopoDS_Compound):
             obj = unwrap_topods_compound(obj, fully=True)
         if isinstance(obj, TopoDS_Wire):

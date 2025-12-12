@@ -63,23 +63,8 @@ import OCP.TopAbs as ta
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Section
 from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
 from OCP.BRepClass3d import BRepClass3d_SolidClassifier
-from OCP.BRepFeat import BRepFeat_MakeDPrism
-from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
 from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Skin
-from OCP.BRepOffsetAPI import (
-    BRepOffsetAPI_DraftAngle,
-    BRepOffsetAPI_MakePipeShell,
-    BRepOffsetAPI_MakeThickSolid,
-)
-from OCP.BRepPrimAPI import (
-    BRepPrimAPI_MakeBox,
-    BRepPrimAPI_MakeCone,
-    BRepPrimAPI_MakeCylinder,
-    BRepPrimAPI_MakeRevol,
-    BRepPrimAPI_MakeSphere,
-    BRepPrimAPI_MakeTorus,
-    BRepPrimAPI_MakeWedge,
-)
+from OCP.BRepOffsetAPI import BRepOffsetAPI_MakePipeShell
 from OCP.GProp import GProp_GProps
 from OCP.GeomAbs import GeomAbs_Intersection, GeomAbs_JoinType
 from OCP.LocOpe import LocOpe_DPrism
@@ -109,6 +94,23 @@ from build123d.geometry import (
     Plane,
     Vector,
     VectorLike,
+)
+from build123d.builders import (
+    DraftAngleError,
+    DraftFaceInput,
+    ocp_box,
+    ocp_chamfer,
+    ocp_cone,
+    ocp_cylinder,
+    ocp_dprism,
+    ocp_draft_angle,
+    ocp_fillet,
+    ocp_pipe_shell,
+    ocp_revol,
+    ocp_sphere,
+    ocp_thick_solid,
+    ocp_torus,
+    ocp_wedge,
 )
 
 from .one_d import Edge, Wire, Mixin1D
@@ -243,8 +245,6 @@ class Mixin3D(Shape[TOPODS]):
         )
 
         # note: we prefer 'length' word to 'radius' as opposed to FreeCAD's API
-        chamfer_builder = BRepFilletAPI_MakeChamfer(self.wrapped)
-
         if length2:
             distance1 = length
             distance2 = length2
@@ -252,18 +252,19 @@ class Mixin3D(Shape[TOPODS]):
             distance1 = length
             distance2 = length
 
+        edge_face_distance_tuples = []
         for native_edge in native_edges:
             if face:
                 topo_face = face.wrapped
             else:
                 topo_face = edge_face_map.FindFromKey(native_edge).First()
-
-            chamfer_builder.Add(
-                distance1, distance2, native_edge, TopoDS.Face_s(topo_face)
-            )  # NB: edge_face_map return a generic TopoDS_Shape
+            edge_face_distance_tuples.append(
+                (native_edge, TopoDS.Face_s(topo_face), distance1, distance2)
+            )
 
         try:
-            new_shape = self.__class__(chamfer_builder.Shape())
+            chamfered_shape = ocp_chamfer(self.wrapped, edge_face_distance_tuples)
+            new_shape = self.__class__(chamfered_shape)
             if not new_shape.is_valid:
                 raise Standard_Failure
         except (StdFail_NotDone, Standard_Failure) as err:
@@ -306,24 +307,18 @@ class Mixin3D(Shape[TOPODS]):
             faces = bounds
 
         shape: TopoDS_Shape | TopoDS_Solid = self.wrapped
-        for face in faces:
-            feat = BRepFeat_MakeDPrism(
+        for dprism_face in faces:
+            shape = ocp_dprism(
                 shape,
-                face.wrapped,
+                dprism_face.wrapped,
                 basis.wrapped if basis else TopoDS_Face(),
                 taper * DEG2RAD,
-                additive,
+                1 if additive else 0,
                 False,
+                height=depth,
+                until_face=up_to_face.wrapped if up_to_face is not None else None,
+                thru_all=(thru_all or depth is None) and up_to_face is None,
             )
-
-            if up_to_face is not None:
-                feat.Perform(up_to_face.wrapped)
-            elif thru_all or depth is None:
-                feat.PerformThruAll()
-            else:
-                feat.Perform(depth)
-
-            shape = feat.Shape()
 
         return self.__class__(shape)
 
@@ -339,15 +334,11 @@ class Mixin3D(Shape[TOPODS]):
         Returns:
             Any: Filleted solid
         """
-        native_edges = [e.wrapped for e in edge_list]
-
-        fillet_builder = BRepFilletAPI_MakeFillet(self.wrapped)
-
-        for native_edge in native_edges:
-            fillet_builder.Add(radius, native_edge)
+        edge_radius_pairs = [(e.wrapped, radius) for e in edge_list]
 
         try:
-            new_shape = self.__class__(fillet_builder.Shape())
+            filleted_shape = ocp_fillet(self.wrapped, edge_radius_pairs)
+            new_shape = self.__class__(filleted_shape)
             if not new_shape.is_valid:
                 raise Standard_Failure
         except (StdFail_NotDone, Standard_Failure) as err:
@@ -355,7 +346,6 @@ class Mixin3D(Shape[TOPODS]):
                 f"Failed creating a fillet with radius of {radius}, try a smaller value"
                 f" or use max_fillet() to find the largest valid fillet radius"
             ) from err
-
         return new_shape
 
     def hollow(
@@ -393,25 +383,23 @@ class Mixin3D(Shape[TOPODS]):
         }
 
         occ_faces_list = TopTools_ListOfShape()
-        for face in faces:
-            occ_faces_list.Append(face.wrapped)
+        for hollow_face in faces:
+            occ_faces_list.Append(hollow_face.wrapped)
 
-        shell_builder = BRepOffsetAPI_MakeThickSolid()
-        shell_builder.MakeThickSolidByJoin(
+        hollow_shape = ocp_thick_solid(
             self.wrapped,
             occ_faces_list,
             thickness,
             tolerance,
-            Intersection=True,
-            Join=kind_dict[kind],
+            intersection=True,
+            join=kind_dict[kind],
         )
-        shell_builder.Build()
 
         if faces:
-            return_value = self.__class__.cast(shell_builder.Shape())
+            return_value = self.__class__.cast(hollow_shape)
 
         else:  # if no faces provided a watertight solid will be constructed
-            shell1 = self.__class__.cast(shell_builder.Shape()).shells()[0].wrapped
+            shell1 = self.__class__.cast(hollow_shape).shells()[0].wrapped
             shell2 = self.shells()[0].wrapped
 
             # s1 can be outer or inner shell depending on the thickness sign
@@ -608,41 +596,27 @@ class Mixin3D(Shape[TOPODS]):
                     f"Failed to find the max value within {tolerance} in {max_iterations}"
                 )
 
-            fillet_builder = BRepFilletAPI_MakeFillet(self.wrapped)
-
-            for native_edge in native_edges:
-                fillet_builder.Add(window_mid, native_edge)
+            # Build edge-radius pairs for this iteration
+            edge_radius_pairs = [(e, window_mid) for e in native_edges]
 
             # Do these numbers work? - if not try with the smaller window
             try:
-                new_shape = self.__class__(fillet_builder.Shape())
+                filleted_shape = ocp_fillet(self.wrapped, edge_radius_pairs)
+                new_shape = self.__class__(filleted_shape)
                 if not new_shape.is_valid:
-                    # raise fillet_exception
                     raise Standard_Failure
-            # except fillet_exception:
             except (Standard_Failure, StdFail_NotDone):
                 return __max_fillet(window_min, window_mid, current_iteration + 1)
 
             # These numbers work, are they close enough? - if not try larger window
             if window_mid - window_min <= tolerance:
-                return_value = window_mid
-            else:
-                return_value = __max_fillet(
-                    window_mid, window_max, current_iteration + 1
-                )
-            return return_value
+                return window_mid
+            return __max_fillet(window_mid, window_max, current_iteration + 1)
 
         if not self.is_valid:
             raise ValueError("Invalid Shape")
 
         native_edges = [e.wrapped for e in edge_list]
-
-        # Unfortunately, MacOS doesn't support the StdFail_NotDone exception so platform
-        # specific exceptions are required.
-        # if platform.system() == "Darwin":
-        #     fillet_exception = Standard_Failure
-        # else:
-        #     fillet_exception = StdFail_NotDone
 
         max_radius = __max_fillet(0.0, 2 * self.bounding_box().diagonal, 0)
 
@@ -683,23 +657,19 @@ class Mixin3D(Shape[TOPODS]):
         }
 
         occ_faces_list = TopTools_ListOfShape()
-        for face in openings:
-            occ_faces_list.Append(face.wrapped)
-
-        offset_builder = BRepOffsetAPI_MakeThickSolid()
-        offset_builder.MakeThickSolidByJoin(
-            self.wrapped,
-            occ_faces_list,
-            thickness,
-            tolerance,
-            Intersection=True,
-            RemoveIntEdges=True,
-            Join=kind_dict[kind],
-        )
-        offset_builder.Build()
+        for offset_face in openings:
+            occ_faces_list.Append(offset_face.wrapped)
 
         try:
-            offset_occt_solid = offset_builder.Shape()
+            offset_occt_solid = ocp_thick_solid(
+                self.wrapped,
+                occ_faces_list,
+                thickness,
+                tolerance,
+                intersection=True,
+                join=kind_dict[kind],
+                remove_internal_edges=True,
+            )
         except (StdFail_NotDone, Standard_Failure) as err:
             raise RuntimeError(
                 "offset Error, an alternative kind may resolve this error"
@@ -1149,16 +1119,7 @@ class Solid(Mixin3D[TopoDS_Solid]):
         Returns:
             Solid: Box
         """
-        return cls(
-            TopoDS.Solid_s(
-                BRepPrimAPI_MakeBox(
-                    plane.to_gp_ax2(),
-                    length,
-                    width,
-                    height,
-                ).Shape()
-            )
-        )
+        return cls(TopoDS.Solid_s(ocp_box(plane.to_gp_ax2(), length, width, height)))
 
     @classmethod
     def make_cone(
@@ -1185,13 +1146,9 @@ class Solid(Mixin3D[TopoDS_Solid]):
         """
         return cls(
             TopoDS.Solid_s(
-                BRepPrimAPI_MakeCone(
-                    plane.to_gp_ax2(),
-                    base_radius,
-                    top_radius,
-                    height,
-                    angle * DEG2RAD,
-                ).Shape()
+                ocp_cone(
+                    plane.to_gp_ax2(), base_radius, top_radius, height, angle * DEG2RAD
+                )
             )
         )
 
@@ -1218,12 +1175,7 @@ class Solid(Mixin3D[TopoDS_Solid]):
         """
         return cls(
             TopoDS.Solid_s(
-                BRepPrimAPI_MakeCylinder(
-                    plane.to_gp_ax2(),
-                    radius,
-                    height,
-                    angle * DEG2RAD,
-                ).Shape()
+                ocp_cylinder(plane.to_gp_ax2(), radius, height, angle * DEG2RAD)
             )
         )
 
@@ -1272,13 +1224,13 @@ class Solid(Mixin3D[TopoDS_Solid]):
         """
         return cls(
             TopoDS.Solid_s(
-                BRepPrimAPI_MakeSphere(
+                ocp_sphere(
                     plane.to_gp_ax2(),
                     radius,
                     angle1 * DEG2RAD,
                     angle2 * DEG2RAD,
                     angle3 * DEG2RAD,
-                ).Shape()
+                )
             )
         )
 
@@ -1308,14 +1260,14 @@ class Solid(Mixin3D[TopoDS_Solid]):
         """
         return cls(
             TopoDS.Solid_s(
-                BRepPrimAPI_MakeTorus(
+                ocp_torus(
                     plane.to_gp_ax2(),
                     major_radius,
                     minor_radius,
                     start_angle * DEG2RAD,
                     end_angle * DEG2RAD,
                     major_angle * DEG2RAD,
-                ).Shape()
+                )
             )
         )
 
@@ -1348,7 +1300,7 @@ class Solid(Mixin3D[TopoDS_Solid]):
         """
         return cls(
             TopoDS.Solid_s(
-                BRepPrimAPI_MakeWedge(
+                ocp_wedge(
                     plane.to_gp_ax2(),
                     delta_x,
                     delta_y,
@@ -1357,7 +1309,7 @@ class Solid(Mixin3D[TopoDS_Solid]):
                     min_z,
                     max_x,
                     max_z,
-                ).Solid()
+                )
             )
         )
 
@@ -1389,14 +1341,11 @@ class Solid(Mixin3D[TopoDS_Solid]):
         else:
             section_face = section
 
-        revol_builder = BRepPrimAPI_MakeRevol(
-            section_face.wrapped,
-            axis.wrapped,
-            angle * DEG2RAD,
-            True,
+        return cls(
+            TopoDS.Solid_s(
+                ocp_revol(section_face.wrapped, axis.wrapped, angle * DEG2RAD)
+            )
         )
-
-        return cls(TopoDS.Solid_s(revol_builder.Shape()))
 
     @classmethod
     def sweep(
@@ -1628,39 +1577,15 @@ class Solid(Mixin3D[TopoDS_Solid]):
                     "Only PLANAR, CYLINDRICAL, and CONICAL faces are supported."
                 )
 
-        draft_angle_builder = BRepOffsetAPI_DraftAngle(self.wrapped)
-
-        for face in faces:
-            draft_angle_builder.Add(
+        draft_inputs = [
+            DraftFaceInput(
                 face.wrapped,
                 neutral_plane.z_dir.to_dir(),
                 radians(angle),
                 neutral_plane.wrapped,
-                Flag=True,
             )
-            if not draft_angle_builder.AddDone():
-                raise DraftAngleError(
-                    "Draft could not be added to a face.",
-                    face=face,
-                    problematic_shape=draft_angle_builder.ProblematicShape(),
-                )
+            for face in faces
+        ]
 
-        try:
-            draft_angle_builder.Build()
-            result = Solid(TopoDS.Solid_s(draft_angle_builder.Shape()))
-        except StdFail_NotDone as err:
-            raise DraftAngleError(
-                "Draft build failed on the given solid.",
-                face=None,
-                problematic_shape=draft_angle_builder.ProblematicShape(),
-            ) from err
-        return result
-
-
-class DraftAngleError(RuntimeError):
-    """Solid.draft custom exception"""
-
-    def __init__(self, message, face=None, problematic_shape=None):
-        super().__init__(message)
-        self.face = face
-        self.problematic_shape = problematic_shape
+        drafted_shape = ocp_draft_angle(self.wrapped, draft_inputs)
+        return Solid(TopoDS.Solid_s(drafted_shape))

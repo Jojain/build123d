@@ -45,13 +45,12 @@ from OCP.TopoDS import (
     TopoDS_Face,
     TopoDS_Shape,
     TopoDS_Shell,
-    TopoDS_Solid,
+    TopoDS_Solid,       
     TopoDS_Vertex,
     TopoDS_Wire,
 )
 
 from build123d.topology import downcast
-from build123d.tracking import get_current_tracker
 
 
 def serialize_shape(shape: TopoDS_Shape) -> bytes | None:
@@ -135,25 +134,6 @@ def deserialize_location(buffer: bytes) -> TopLoc_Location:
 
     return TopLoc_Location(transform)
 
-def serialize_label(label: TDF_Label) -> bytes | None:
-    """
-    Serialize a OCP label, this method can be used to provide a custom serialization algo for pickle
-    """
-    entry = TCollection_AsciiString()
-    TDF_Tool.Entry_s(label, entry)
-    return entry.ToCString().encode("utf-8")
-
-def deserialize_label(buffer: bytes) -> TDF_Label:
-    """
-    This does the opposite as serialize, it construct a TDF_Label from bytes.
-    """
-    if buffer is None:
-        return None
-    label = TDF_Label()
-    entry = TCollection_AsciiString(buffer.decode("utf-8"))
-    tracker = get_current_tracker()
-    return tracker.get_label(entry)
-
 def reduce_shape(shape: TopoDS_Shape) -> tuple:
     """Special function used by pickle to serialize or deserialize OCP Shapes objects"""
     return (deserialize_shape, (serialize_shape(shape),))
@@ -181,4 +161,3 @@ def modify_copyreg():
     copyreg.pickle(TopoDS_Edge, reduce_shape)
     copyreg.pickle(TopoDS_Vertex, reduce_shape)
     copyreg.pickle(TopLoc_Location, reduce_location)
-    copyreg.pickle(TDF_Label, reduce_label)

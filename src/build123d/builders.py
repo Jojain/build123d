@@ -31,6 +31,7 @@ license:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from OCP.BRepAlgoAPI import (
@@ -439,9 +440,29 @@ def ocp_thick_solid(
     return result
 
 
+class DraftAngleError(Exception):
+    """Exception raised when draft angle operation fails."""
+
+    def __init__(
+        self,
+        message: str,
+        face: TopoDS_Face | None = None,
+        problematic_shape: TopoDS_Shape | None = None,
+    ):
+        super().__init__(message)
+        self.face = face
+        self.problematic_shape = problematic_shape
+
+@dataclass
+class DraftFaceInput:
+    face: TopoDS_Face
+    direction: gp_Dir
+    angle: float
+    neutral_plane: gp_Pln
+
 def ocp_draft_angle(
     shape: TopoDS_Shape,
-    face_angle_tuples: Sequence[tuple[TopoDS_Face, gp_Dir, float, gp_Pln]],
+    draft_inputs: Sequence[DraftFaceInput],
 ) -> TopoDS_Shape:
     """Add draft angles to faces with tracking.
 
@@ -449,14 +470,23 @@ def ocp_draft_angle(
 
     Args:
         shape: The shape to add draft to
-        face_angle_tuples: Sequence of (face, direction, angle_radians, neutral_plane) tuples
+        draft_inputs: Sequence of DraftFaceInput objects
 
     Returns:
         Drafted TopoDS_Shape
+
+    Raises:
+        DraftAngleError: If draft cannot be added to a face or build fails
     """
     builder = BRepOffsetAPI_DraftAngle(shape)
-    for face, direction, angle, plane in face_angle_tuples:
-        builder.Add(face, direction, angle, plane, Flag=True)
+    for draft_input in draft_inputs:
+        builder.Add(draft_input.face, draft_input.direction, draft_input.angle, draft_input.neutral_plane, Flag=True)
+        if not builder.AddDone():
+            raise DraftAngleError(
+                "Draft could not be added to a face.",
+                face=draft_input.face,
+                problematic_shape=builder.ProblematicShape(),
+            )
     builder.Build()
     result = builder.Shape()
     track({shape}, builder)
@@ -949,11 +979,3 @@ def ocp_sewing(
     result = builder.SewedShape()
     track(set(faces_list), builder)
     return result
-
-
-# =============================================================================
-# Backwards compatibility alias
-# =============================================================================
-
-# Alias for existing code that imports `transform`
-transform = ocp_transform

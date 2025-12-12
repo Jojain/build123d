@@ -83,15 +83,11 @@ from OCP.BRepAlgoAPI import (
     BRepAlgoAPI_Splitter,
 )
 from OCP.BRepBuilderAPI import (
-    BRepBuilderAPI_Copy,
-    BRepBuilderAPI_GTransform,
     BRepBuilderAPI_MakeEdge,
     BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakeVertex,
     BRepBuilderAPI_RightCorner,
     BRepBuilderAPI_RoundCorner,
-    BRepBuilderAPI_Sewing,
-    BRepBuilderAPI_Transform,
     BRepBuilderAPI_Transformed,
 )
 from OCP.BRepCheck import BRepCheck_Analyzer
@@ -100,7 +96,6 @@ from OCP.BRepFeat import BRepFeat_SplitShape
 from OCP.BRepGProp import BRepGProp, BRepGProp_Face
 from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeHalfSpace
 from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
 from OCP.gce import gce_MakeLin
 from OCP.Geom import Geom_Line
@@ -149,6 +144,15 @@ from build123d.geometry import (
     Vector,
     VectorLike,
     logger,
+)
+from build123d.tracking_hooks import track
+from build123d.builders import (
+    ocp_copy,
+    ocp_gtransform,
+    ocp_half_space,
+    ocp_sewing,
+    ocp_splitter,
+    ocp_transform,
 )
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -934,7 +938,7 @@ class Shape(NodeMixin, Generic[TOPODS]):
         result = cls.__new__(cls)
         memo[id(self)] = result
         if self.wrapped is not None:
-            memo[id(self.wrapped)] = downcast(BRepBuilderAPI_Copy(self.wrapped).Shape())
+            memo[id(self.wrapped)] = downcast(ocp_copy(self.wrapped))
         for key, value in self.__dict__.items():
             if key == "topo_parent":
                 result.topo_parent = value
@@ -1688,9 +1692,9 @@ class Shape(NodeMixin, Generic[TOPODS]):
 
             trsf = gp_Trsf()
             trsf.SetDisplacement(new_ax, old_ax)
-            builder = BRepBuilderAPI_Transform(self.wrapped, trsf, True, True)
+            transformed = ocp_transform(self.wrapped, trsf, copy=True, copy_geom=True)
 
-            self.wrapped = tcast(TOPODS, downcast(builder.Shape()))
+            self.wrapped = tcast(TOPODS, downcast(transformed))
             self.wrapped.Location(loc.wrapped)
 
     def rotate(self, axis: Axis, angle: float) -> Self:
@@ -1846,29 +1850,15 @@ class Shape(NodeMixin, Generic[TOPODS]):
         if keep in [Keep.INSIDE, Keep.OUTSIDE]:
             raise ValueError(f"{keep} is invalid")
 
-        shape_list = TopTools_ListOfShape()
-        shape_list.Append(self.wrapped)
-
         # Define the splitting tool
         trim_tool = (
             BRepBuilderAPI_MakeFace(tool.wrapped).Face()  # gp_Pln to Face
             if isinstance(tool, Plane)
             else tool.wrapped
         )
-        tool_list = TopTools_ListOfShape()
-        tool_list.Append(trim_tool)
-
-        # Create the splitter algorithm
-        splitter = BRepAlgoAPI_Splitter()
-
-        # Set the shape to be split and the splitting tool (plane face)
-        splitter.SetArguments(shape_list)
-        splitter.SetTools(tool_list)
 
         # Perform the splitting operation
-        splitter.Build()
-
-        split_result = downcast(splitter.Shape())
+        split_result = downcast(ocp_splitter([self.wrapped], [trim_tool]))
         # Remove unnecessary TopoDS_Compound around single shape
         if isinstance(split_result, TopoDS_Compound):
             split_result = unwrap_topods_compound(split_result, True)
@@ -1903,11 +1893,7 @@ class Shape(NodeMixin, Generic[TOPODS]):
             ref_point = surface_point + normalized_surface_normal
 
             # Create a HalfSpace - Solidish object to determine top/bottom
-            # Note: BRepPrimAPI_MakeHalfSpace takes either a TopoDS_Shell or TopoDS_Face but the
-            # mypy expects only a TopoDS_Shell here
-            half_space_maker = BRepPrimAPI_MakeHalfSpace(trim_tool, ref_point.to_pnt())
-            # type: ignore
-            tool_solid = half_space_maker.Solid()
+            tool_solid = ocp_half_space(trim_tool, ref_point.to_pnt())
 
         tops: list[Shape] = []
         bottoms: list[Shape] = []
@@ -2162,9 +2148,7 @@ class Shape(NodeMixin, Generic[TOPODS]):
         if self._wrapped is None:
             return self
         new_shape = copy.deepcopy(self, None)
-        transformed = downcast(
-            BRepBuilderAPI_GTransform(self.wrapped, t_matrix.wrapped, True).Shape()
-        )
+        transformed = downcast(ocp_gtransform(self.wrapped, t_matrix.wrapped, copy=True))
         new_shape.wrapped = tcast(TOPODS, transformed)
 
         return new_shape
@@ -2185,10 +2169,8 @@ class Shape(NodeMixin, Generic[TOPODS]):
         if self._wrapped is None:
             return self
         new_shape = copy.deepcopy(self, None)
-        transformed = downcast(
-            BRepBuilderAPI_Transform(self.wrapped, t_matrix.wrapped.Trsf()).Shape()
-        )
-        new_shape.wrapped = tcast(TOPODS, transformed)
+        transformed = ocp_transform(self.wrapped, t_matrix.wrapped.Trsf())
+        new_shape.wrapped = tcast(TOPODS, downcast(transformed))
 
         return new_shape
 
@@ -2258,11 +2240,7 @@ class Shape(NodeMixin, Generic[TOPODS]):
         if self._wrapped is None:
             return self
         shape_copy: Shape = copy.deepcopy(self, None)
-        transformed_shape = BRepBuilderAPI_Transform(
-            self.wrapped,
-            transformation,
-            True,
-        ).Shape()
+        transformed_shape = ocp_transform(self.wrapped, transformation, copy=True)
         shape_copy.wrapped = tcast(TOPODS, downcast(transformed_shape))
         return shape_copy
 
@@ -2311,8 +2289,9 @@ class Shape(NodeMixin, Generic[TOPODS]):
 
         operation.SetRunParallel(True)
         operation.Build()
-
-        topo_result = downcast(operation.Shape())
+        result = operation.Shape()
+        track(set(args), operation)
+        topo_result = downcast(result)
 
         # Clean
         if SkipClean.clean:
@@ -3163,11 +3142,7 @@ class SkipClean:
 
 def _sew_topods_faces(faces: Iterable[TopoDS_Face]) -> TopoDS_Shape:
     """Sew faces into a shell if possible"""
-    shell_builder = BRepBuilderAPI_Sewing()
-    for face in faces:
-        shell_builder.Add(face)
-    shell_builder.Perform()
-    return downcast(shell_builder.SewedShape())
+    return downcast(ocp_sewing(faces))
 
 
 def _topods_bool_op(
