@@ -121,7 +121,7 @@ class TestPartOperationDraft(unittest.TestCase):
         with self.assertRaises(DraftAngleError):
             draft(self.bottom_face, self.neutral_plane, 10)
 
-    @patch("build123d.topology.three_d.BRepOffsetAPI_DraftAngle")
+    @patch("build123d.builders.BRepOffsetAPI_DraftAngle")
     def test_draftangleerror_from_solid_draft(self, mock_draft_angle):
         """Simulate a failure in AddDone and catch DraftAngleError"""
         mock_builder = MagicMock()
