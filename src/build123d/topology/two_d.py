@@ -80,7 +80,6 @@ from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet2d
 from OCP.BRepGProp import BRepGProp, BRepGProp_Face
 from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
 from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeFilling, BRepOffsetAPI_MakePipeShell
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeRevol
 from OCP.BRepTools import BRepTools, BRepTools_ReShape
 from OCP.gce import gce_MakeLin
 from OCP.Geom import (
@@ -142,6 +141,8 @@ from build123d.geometry import (
     Vector,
     VectorLike,
 )
+
+from build123d.builders import ocp_fillet_2d, ocp_revol
 
 from .one_d import Edge, Mixin1D, Wire
 from .shape_core import (
@@ -1535,14 +1536,7 @@ class Face(Mixin2D[TopoDS_Face]):
         Returns:
             Face: resulting face
         """
-        revol_builder = BRepPrimAPI_MakeRevol(
-            profile.wrapped,
-            axis.wrapped,
-            angle * DEG2RAD,
-            True,
-        )
-
-        return cls(revol_builder.Shape())  # type:ignore[call-overload]
+        return cls(ocp_revol(profile.wrapped, axis.wrapped, angle * DEG2RAD))  # type:ignore[call-overload]
 
     @classmethod
     def sew_faces(cls, faces: Iterable[Face]) -> list[ShapeList[Face]]:
@@ -1731,15 +1725,9 @@ class Face(Mixin2D[TopoDS_Face]):
         Returns:
 
         """
-
-        fillet_builder = BRepFilletAPI_MakeFillet2d(self.wrapped)
-
-        for vertex in vertices:
-            fillet_builder.AddFillet(vertex.wrapped, radius)
-
-        fillet_builder.Build()
-
-        return self.__class__.cast(fillet_builder.Shape())
+        vertex_radius_pairs = [(v.wrapped, radius) for v in vertices]
+        filleted_shape = ocp_fillet_2d(self.wrapped, vertex_radius_pairs)
+        return self.__class__.cast(filleted_shape)
 
     def geom_adaptor(self) -> Geom_Surface:
         """Return the Geom Surface for this Face"""

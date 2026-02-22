@@ -39,7 +39,6 @@ from build123d.objects_part import Box, Torus
 from build123d.objects_sketch import Circle, Rectangle
 from build123d.topology import (
     Compound,
-    DraftAngleError,
     Edge,
     Face,
     Shell,
@@ -47,8 +46,8 @@ from build123d.topology import (
     Vertex,
     Wire,
 )
+from build123d.builders import DraftAngleError
 import build123d
-from OCP.BRepOffsetAPI import BRepOffsetAPI_DraftAngle
 from OCP.StdFail import StdFail_NotDone
 
 
@@ -289,7 +288,7 @@ class TestSolidDraft(unittest.TestCase):
             torus.draft([torus.faces()[0]], self.neutral_plane, 5)
         self.assertIn("unsupported geometry type", str(cm.exception))
 
-    @patch("build123d.topology.three_d.BRepOffsetAPI_DraftAngle")
+    @patch("build123d._builders.BRepOffsetAPI_DraftAngle")
     def test_adddone_failure_raises_draftangleerror(self, mock_draft_api):
         """Test that failure of AddDone() raises DraftAngleError"""
         mock_builder = MagicMock()
@@ -304,7 +303,7 @@ class TestSolidDraft(unittest.TestCase):
         self.assertIn("Draft could not be added", str(cm.exception))
 
     @patch.object(
-        build123d.topology.three_d.BRepOffsetAPI_DraftAngle,
+        build123d._builders.BRepOffsetAPI_DraftAngle,
         "Build",
         side_effect=StdFail_NotDone,
     )

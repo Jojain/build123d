@@ -34,6 +34,8 @@ import io
 import struct
 
 from OCP.BinTools import BinTools
+from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
+from OCP.TDF import TDF_Label, TDF_Tool
 from OCP.gp import gp_Quaternion, gp_Trsf, gp_Vec
 from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import (
@@ -43,7 +45,7 @@ from OCP.TopoDS import (
     TopoDS_Face,
     TopoDS_Shape,
     TopoDS_Shell,
-    TopoDS_Solid,
+    TopoDS_Solid,       
     TopoDS_Vertex,
     TopoDS_Wire,
 )
@@ -132,7 +134,6 @@ def deserialize_location(buffer: bytes) -> TopLoc_Location:
 
     return TopLoc_Location(transform)
 
-
 def reduce_shape(shape: TopoDS_Shape) -> tuple:
     """Special function used by pickle to serialize or deserialize OCP Shapes objects"""
     return (deserialize_shape, (serialize_shape(shape),))
@@ -142,6 +143,9 @@ def reduce_location(location: TopLoc_Location) -> tuple:
     """Special function used by pickle to serialize or deserialize OCP Location objects"""
     return (deserialize_location, (serialize_location(location),))
 
+def reduce_label(label: TDF_Label) -> tuple:
+    """Special function used by pickle to serialize or deserialize OCP Label objects"""
+    return (deserialize_label, (serialize_label(label),))
 
 def modify_copyreg():
     """

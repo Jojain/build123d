@@ -49,7 +49,9 @@ import webcolors  # type: ignore
 from OCP.Bnd import Bnd_Box, Bnd_OBB
 from OCP.BRep import BRep_Tool
 from OCP.BRepBndLib import BRepBndLib
-from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_Transform
+from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+
+from build123d.builders import ocp_transform
 from OCP.BRepGProp import BRepGProp, BRepGProp_Face  # used for mass calculation
 from OCP.BRepTools import BRepTools
 from OCP.Geom import Geom_BoundedSurface, Geom_Line, Geom_Plane
@@ -3195,11 +3197,8 @@ class Plane(metaclass=PlaneMeta):
                 raise ValueError(f"Unknown object type {obj}") from exc
 
             new_shape: Shape = copy_module.deepcopy(obj, None)  # type: ignore[arg-type]
-            new_shape.wrapped = f_downcast(
-                BRepBuilderAPI_Transform(
-                    obj.wrapped, transform_matrix.wrapped.Trsf()
-                ).Shape()
-            )
+            transformed = ocp_transform(obj.wrapped, transform_matrix.wrapped.Trsf())
+            new_shape.wrapped = f_downcast(transformed)
             return new_shape
         raise ValueError(
             f"Unable to repositioned type {type(obj)} with respect to local coordinates"
